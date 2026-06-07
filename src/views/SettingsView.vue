@@ -5,8 +5,6 @@ import { useSettings } from '../composables/useSettings'
 const {
   settings,
   setTheme,
-  setViewMode,
-  setConfirmDelete,
   setCompactMode,
   setMarketAnimation,
   resetSettings,
@@ -15,11 +13,6 @@ const {
 const themes = [
   { value: 'dark', label: 'Темная' },
   { value: 'light', label: 'Светлая' },
-]
-
-const viewModes = [
-  { value: 'cards', label: 'Карточки' },
-  { value: 'table', label: 'Таблица' },
 ]
 
 const interfaceModes = [
@@ -33,16 +26,12 @@ const summaryItems = computed(() => [
     value: settings.theme === 'dark' ? 'Темная' : 'Светлая',
   },
   {
-    label: 'Журнал',
-    value: settings.viewMode === 'cards' ? 'Карточки' : 'Таблица',
-  },
-  {
     label: 'Плотность',
     value: settings.compactMode ? 'Компактная' : 'Обычная',
   },
   {
-    label: 'Рынок',
-    value: settings.marketAnimation ? 'Live' : 'Пауза',
+    label: 'Автообновление',
+    value: settings.marketAnimation ? '5 секунд' : 'Пауза',
   },
 ])
 </script>
@@ -94,27 +83,8 @@ const summaryItems = computed(() => [
 
     <div class="settings-group">
       <div class="settings-group-header">
-        <h2>Журнал</h2>
-        <span>{{ settings.viewMode === 'cards' ? 'Cards' : 'Table' }}</span>
-      </div>
-
-      <div class="segmented-control">
-        <button
-          v-for="mode in viewModes"
-          :key="mode.value"
-          type="button"
-          :class="{ selected: settings.viewMode === mode.value }"
-          @click="setViewMode(mode.value)"
-        >
-          {{ mode.label }}
-        </button>
-      </div>
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-header">
-        <h2>Рынок</h2>
-        <span>{{ settings.marketAnimation ? 'Live' : 'Pause' }}</span>
+        <h2>Автообновление</h2>
+        <span>{{ settings.marketAnimation ? '5 sec' : 'Pause' }}</span>
       </div>
 
       <label class="toggle-row">
@@ -123,23 +93,7 @@ const summaryItems = computed(() => [
           type="checkbox"
           @change="setMarketAnimation($event.target.checked)"
         />
-        <span>Обновлять демо-котировки</span>
-      </label>
-    </div>
-
-    <div class="settings-group">
-      <div class="settings-group-header">
-        <h2>Удаление</h2>
-        <span>{{ settings.confirmDelete ? 'Confirm' : 'Fast' }}</span>
-      </div>
-
-      <label class="toggle-row">
-        <input
-          :checked="settings.confirmDelete"
-          type="checkbox"
-          @change="setConfirmDelete($event.target.checked)"
-        />
-        <span>Запрашивать подтверждение</span>
+        <span>Обновлять котировки, график, стакан и сделки</span>
       </label>
     </div>
 

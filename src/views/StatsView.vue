@@ -1,95 +1,72 @@
 <script setup>
 import { computed } from 'vue'
-import { useItems } from '../composables/useItems'
+import { useMarketSimulator } from '../composables/useMarketSimulator'
 
-const { visibleItems, totalCount, activeCount, doneCount } = useItems()
+const { markets, marketSummary, accountSummary, positions, openOrders } = useMarketSimulator()
 
-const completionRate = computed(() =>
-  totalCount.value ? Math.round((doneCount.value / totalCount.value) * 100) : 0,
+const growingMarkets = computed(() =>
+  [...markets.value].sort((first, second) => second.change - first.change).slice(0, 4),
 )
 
-const categoryStats = computed(() => {
-  const stats = new Map()
-
-  visibleItems.value.forEach((item) => {
-    const current = stats.get(item.category) ?? { total: 0, done: 0 }
-    current.total += 1
-    current.done += item.isDone ? 1 : 0
-    stats.set(item.category, current)
-  })
-
-  return [...stats.entries()]
-    .map(([category, value]) => ({
-      category,
-      total: value.total,
-      done: value.done,
-      percent: Math.round((value.done / value.total) * 100),
-    }))
-    .sort((first, second) => second.total - first.total)
-})
-
-const latestItems = computed(() =>
-  [...visibleItems.value].sort((first, second) => second.createdAt - first.createdAt).slice(0, 4),
+const fallingMarkets = computed(() =>
+  [...markets.value].sort((first, second) => first.change - second.change).slice(0, 4),
 )
 </script>
 
 <template>
   <section class="page-header">
     <p class="eyebrow">Аналитика</p>
-    <h1>Статистика портфеля</h1>
+    <h1>Статистика биржи</h1>
   </section>
 
   <section class="stats-grid">
     <div class="stat-block">
-      <span>Завершенность</span>
-      <strong>{{ completionRate }}%</strong>
-      <div class="progress-line">
-        <span :style="{ width: `${completionRate}%` }"></span>
-      </div>
+      <span>Среднее 24h</span>
+      <strong :class="marketSummary.averageChange >= 0 ? 'positive-text' : 'negative-text'">
+        {{ marketSummary.averageChange > 0 ? '+' : '' }}{{ marketSummary.averageChange.toFixed(2) }}%
+      </strong>
+      <small>{{ marketSummary.positive }} растут / {{ marketSummary.negative }} падают</small>
     </div>
     <div class="stat-block">
-      <span>Активные идеи</span>
-      <strong>{{ activeCount }}</strong>
-      <small>Еще требуют решения</small>
+      <span>Equity</span>
+      <strong>{{ accountSummary.equity.toFixed(2) }} USDT</strong>
+      <small>Учебный баланс терминала</small>
     </div>
     <div class="stat-block">
-      <span>Закрытые идеи</span>
-      <strong>{{ doneCount }}</strong>
-      <small>Отмечены как выполненные</small>
+      <span>Позиции</span>
+      <strong>{{ positions.length }}</strong>
+      <small>Открытые демо-позиции</small>
     </div>
     <div class="stat-block">
-      <span>В работе</span>
-      <strong>{{ totalCount }}</strong>
-      <small>Все актуальные планы</small>
+      <span>Ордера</span>
+      <strong>{{ openOrders.length }}</strong>
+      <small>Ожидают исполнения</small>
     </div>
   </section>
 
   <section class="split-layout">
     <div>
-      <h2>Категории</h2>
-      <div v-if="categoryStats.length" class="category-list">
-        <div v-for="item in categoryStats" :key="item.category" class="category-row">
-          <div>
-            <strong>{{ item.category }}</strong>
-            <span>{{ item.done }} из {{ item.total }} закрыто</span>
-          </div>
-          <div class="progress-line compact">
-            <span :style="{ width: `${item.percent}%` }"></span>
-          </div>
-        </div>
-      </div>
-      <p v-else class="muted-text">Нет данных для расчета категорий.</p>
+      <h2>Лидеры роста</h2>
+      <ul class="plain-list">
+        <li v-for="market in growingMarkets" :key="market.symbol">
+          <span>{{ market.symbol }}</span>
+          <strong :class="market.change >= 0 ? 'positive-text' : 'negative-text'">
+            {{ market.change > 0 ? '+' : '' }}{{ market.change.toFixed(2) }}%
+          </strong>
+        </li>
+      </ul>
     </div>
 
     <div>
-      <h2>Последние записи</h2>
-      <ul v-if="latestItems.length" class="plain-list">
-        <li v-for="item in latestItems" :key="item.id">
-          <span>{{ item.category }}</span>
-          <strong>{{ item.title }}</strong>
+      <h2>Слабые рынки</h2>
+      <ul class="plain-list">
+        <li v-for="market in fallingMarkets" :key="market.symbol">
+          <span>{{ market.symbol }}</span>
+          <strong :class="market.change >= 0 ? 'positive-text' : 'negative-text'">
+            {{ market.change > 0 ? '+' : '' }}{{ market.change.toFixed(2) }}%
+          </strong>
         </li>
       </ul>
-      <p v-else class="muted-text">Портфель пока пуст.</p>
     </div>
   </section>
 </template>

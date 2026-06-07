@@ -1,12 +1,8 @@
 <script setup>
 import { RouterLink } from 'vue-router'
-import { useItems } from '../composables/useItems'
-
-const { activeCount } = useItems()
 
 const navItems = [
   { to: '/', label: 'Терминал' },
-  { to: '/create', label: 'План' },
   { to: '/stats', label: 'Аналитика' },
   { to: '/settings', label: 'Настройки' },
   { to: '/about', label: 'О проекте' },
@@ -35,9 +31,9 @@ const navItems = [
       </RouterLink>
     </nav>
 
-    <div class="market-status" aria-label="Состояние портфеля">
+    <div class="market-status" aria-label="Состояние биржи">
       <span class="status-dot"></span>
-      <span>{{ activeCount }} активных</span>
+      <span>Биржа активна</span>
     </div>
   </header>
 </template>

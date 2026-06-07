@@ -1,8 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useLoader } from '../composables/useLoader'
 import HomeView from '../views/HomeView.vue'
-import CreateView from '../views/CreateView.vue'
-import EditView from '../views/EditView.vue'
 import AboutView from '../views/AboutView.vue'
 import StatsView from '../views/StatsView.vue'
 import SettingsView from '../views/SettingsView.vue'
@@ -12,8 +10,6 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'home', component: HomeView },
-    { path: '/create', name: 'create', component: CreateView },
-    { path: '/edit/:id', name: 'edit', component: EditView },
     { path: '/about', name: 'about', component: AboutView },
     { path: '/stats', name: 'stats', component: StatsView },
     { path: '/settings', name: 'settings', component: SettingsView },

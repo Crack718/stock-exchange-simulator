@@ -1,15 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
-import ItemFilters from '../components/ItemFilters.vue'
-import ItemList from '../components/ItemList.vue'
-import { useItems } from '../composables/useItems'
 import { useMarketSimulator } from '../composables/useMarketSimulator'
-import { useSettings } from '../composables/useSettings'
 
-const { visibleItems, totalCount, activeCount, doneCount, addItem, toggleDone, softDelete } =
-  useItems()
-const { settings } = useSettings()
 const {
   markets,
   selectedMarket,
@@ -23,13 +15,17 @@ const {
   selectMarket,
   placeDemoOrder,
   cancelOrder,
+  closePosition,
+  isLiveMarket,
+  isRefreshing,
+  marketStatus,
+  marketError,
+  lastUpdated,
+  refreshIntervalMs,
+  selectedInterval,
+  setMarketInterval,
+  refreshMarketData,
 } = useMarketSimulator()
-
-const filters = reactive({
-  search: '',
-  category: 'all',
-  status: 'all',
-})
 
 const order = reactive({
   side: 'buy',
@@ -44,24 +40,15 @@ const order = reactive({
 })
 
 const lastTicketTitle = ref('')
-const selectedTimeframe = ref('5m')
 
 const timeframes = [
-  { value: '1m', label: '1m', wave: 1.55, range: 0.7 },
-  { value: '5m', label: '5m', wave: 1.15, range: 0.92 },
-  { value: '15m', label: '15m', wave: 0.86, range: 1.08 },
-  { value: '1h', label: '1h', wave: 0.64, range: 1.24 },
-  { value: '4h', label: '4h', wave: 0.46, range: 1.44 },
-  { value: '1d', label: '1d', wave: 0.32, range: 1.72 },
+  { value: '1m', label: '1m' },
+  { value: '5m', label: '5m' },
+  { value: '15m', label: '15m' },
+  { value: '1h', label: '1h' },
+  { value: '4h', label: '4h' },
+  { value: '1d', label: '1d' },
 ]
-
-const categoryOptions = computed(() =>
-  [...new Set(visibleItems.value.map((item) => item.category))].sort(),
-)
-
-const completionRate = computed(() =>
-  totalCount.value ? Math.round((doneCount.value / totalCount.value) * 100) : 0,
-)
 
 const executionPrice = computed(() =>
   order.orderType === 'market' ? selectedMarket.value.price : Number(order.price || 0),
@@ -71,18 +58,48 @@ const notionalValue = computed(() => executionPrice.value * Number(order.amount 
 const marginValue = computed(() => notionalValue.value / Number(order.leverage || 1))
 const feeValue = computed(() => notionalValue.value * 0.0005)
 
+const chartBounds = computed(() => {
+  const values = priceHistory.value.map((point) => point.value)
+
+  if (!values.length) {
+    const price = selectedMarket.value.price || 1
+    return {
+      min: price * 0.995,
+      max: price * 1.005,
+    }
+  }
+
+  const rawMin = Math.min(...values)
+  const rawMax = Math.max(...values)
+  const padding = Math.max((rawMax - rawMin) * 0.08, selectedMarket.value.price * 0.001)
+
+  return {
+    min: rawMin - padding,
+    max: rawMax + padding,
+  }
+})
+
+const chartGuideLines = computed(() => {
+  const top = 30
+  const bottom = 168
+
+  return [0.22, 0.5, 0.78].map((percent, index) => ({
+    id: `guide-${index}`,
+    y: top + (bottom - top) * percent,
+  }))
+})
+
 const chartPoints = computed(() => {
-  const activeFrame =
-    timeframes.find((timeframe) => timeframe.value === selectedTimeframe.value) ?? timeframes[1]
-  const values = priceHistory.value.map((point, index) => {
-    const pulse = Math.sin(index * activeFrame.wave) * selectedMarket.value.price * 0.006
-    return point.value + pulse * activeFrame.range
-  })
-  const min = Math.min(...values)
-  const max = Math.max(...values)
+  const values = priceHistory.value.map((point) => point.value)
+
+  if (!values.length) {
+    return []
+  }
+
+  const { min, max } = chartBounds.value
   const width = 552
-  const top = 28
-  const bottom = 170
+  const top = 30
+  const bottom = 168
 
   return values.map((value, index) => {
     const percent = (value - min) / (max - min || 1)
@@ -90,49 +107,33 @@ const chartPoints = computed(() => {
       id: index,
       x: 24 + (index * width) / Math.max(values.length - 1, 1),
       y: bottom - percent * (bottom - top),
-      volumeHeight: 12 + priceHistory.value[index].height * 0.34,
-      positive: priceHistory.value[index].positive,
+      volumeHeight: 8 + (priceHistory.value[index]?.height ?? 18) * 0.22,
+      positive: priceHistory.value[index]?.positive ?? true,
     }
   })
+})
+
+const chartTimeLabels = computed(() => {
+  const points = priceHistory.value
+
+  if (points.length < 2) {
+    return []
+  }
+
+  const indexes = [0, points.length - 1]
+  return indexes.map((index) => ({
+    id: `time-${index}`,
+    label: formatChartTime(points[index]),
+  }))
 })
 
 const chartLinePoints = computed(() =>
   chartPoints.value.map((point) => `${point.x},${point.y}`).join(' '),
 )
 
-const chartFillPath = computed(() => {
-  if (!chartPoints.value.length) {
-    return ''
-  }
-
-  const firstPoint = chartPoints.value[0]
-  const lastPoint = chartPoints.value[chartPoints.value.length - 1]
-  return `M ${firstPoint.x} 178 L ${chartLinePoints.value} L ${lastPoint.x} 178 Z`
-})
-
 const chartLastPoint = computed(
   () => chartPoints.value[chartPoints.value.length - 1] ?? { x: 0, y: 0 },
 )
-
-const filteredItems = computed(() => {
-  const searchValue = filters.search.trim().toLowerCase()
-
-  return visibleItems.value
-    .filter((item) => {
-      const matchesSearch =
-        !searchValue ||
-        item.title.toLowerCase().includes(searchValue) ||
-        item.description.toLowerCase().includes(searchValue)
-      const matchesCategory = filters.category === 'all' || item.category === filters.category
-      const matchesStatus =
-        filters.status === 'all' ||
-        (filters.status === 'active' && !item.isDone) ||
-        (filters.status === 'done' && item.isDone)
-
-      return matchesSearch && matchesCategory && matchesStatus
-    })
-    .sort((first, second) => second.createdAt - first.createdAt)
-})
 
 const tickerItems = computed(() => [
   {
@@ -141,9 +142,9 @@ const tickerItems = computed(() => [
     tone: marketSummary.value.averageChange >= 0 ? 'positive' : 'negative',
   },
   {
-    label: 'Funding',
-    value: `${selectedMarket.value.fundingRate.toFixed(4)}%`,
-    tone: selectedMarket.value.fundingRate >= 0 ? 'positive' : 'negative',
+    label: 'Объем 24h',
+    value: selectedMarket.value.volume,
+    tone: 'neutral',
   },
   {
     label: 'Equity',
@@ -151,8 +152,8 @@ const tickerItems = computed(() => [
     tone: accountSummary.value.unrealizedPnl >= 0 ? 'positive' : 'negative',
   },
   {
-    label: 'Планы закрыты',
-    value: `${completionRate.value}%`,
+    label: 'Открытые ордера',
+    value: openOrders.value.length,
     tone: 'neutral',
   },
 ])
@@ -182,14 +183,30 @@ function formatPercent(value) {
   return `${sign}${Number(value || 0).toFixed(2)}%`
 }
 
-function resetFilters() {
-  filters.search = ''
-  filters.category = 'all'
-  filters.status = 'all'
+function setTimeframe(timeframe) {
+  setMarketInterval(timeframe)
 }
 
-function setTimeframe(timeframe) {
-  selectedTimeframe.value = timeframe
+function formatTime(timestamp) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(timestamp))
+}
+
+function formatChartTime(point) {
+  const rawValue = Number(point?.time ?? point?.id)
+
+  if (!Number.isFinite(rawValue) || rawValue < 100000000000) {
+    return selectedInterval.value
+  }
+
+  const options = selectedInterval.value === '1d'
+    ? { day: '2-digit', month: '2-digit' }
+    : { hour: '2-digit', minute: '2-digit' }
+
+  return new Intl.DateTimeFormat('ru-RU', options).format(new Date(rawValue))
 }
 
 function formatSideLabel(side) {
@@ -211,12 +228,26 @@ function formatSymbolPrice(symbol, value) {
   return formatMoney(value, market?.precision ?? 2)
 }
 
-function requestSoftDelete(id) {
-  if (settings.confirmDelete && !confirm('Удалить торговый план из журнала?')) {
+function getPositionPnl(position) {
+  const market = markets.value.find((item) => item.symbol === position.symbol)
+
+  if (!market) {
+    return 0
+  }
+
+  const direction = position.side === 'buy' ? 1 : -1
+  return (market.price - position.entryPrice) * position.amount * direction
+}
+
+function closePositionById(id) {
+  const result = closePosition(id)
+
+  if (!result) {
     return
   }
 
-  softDelete(id)
+  const netPnl = result.realizedPnl - result.fee
+  lastTicketTitle.value = `${result.closedPositionId} закрыта: ${formatMoney(netPnl)} USDT`
 }
 
 function submitMarketOrder() {
@@ -231,31 +262,6 @@ function submitMarketOrder() {
   }
 
   const result = placeDemoOrder(order)
-  const sideLabel = order.side === 'buy' ? 'Long' : 'Short'
-  const typeLabel = order.orderType === 'market' ? 'Market' : order.orderType
-  const note = order.note.trim()
-  const title = `${sideLabel} ${selectedMarket.value.symbol} ${typeLabel}`
-  const description = [
-    `Тип: ${typeLabel}, режим маржи: ${order.marginMode}, плечо x${order.leverage}.`,
-    `Объем: ${order.amount}, расчетная цена: ${formatMoney(
-      executionPrice.value,
-      selectedMarket.value.precision,
-    )}.`,
-    `Маржа: ${formatMoney(marginValue.value)} USDT, комиссия: ${formatMoney(feeValue.value)} USDT.`,
-    order.takeProfit ? `TP: ${order.takeProfit}.` : '',
-    order.stopLoss ? `SL: ${order.stopLoss}.` : '',
-    note ? `Заметка: ${note}` : 'Заметка: демо-сделка из терминала.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-
-  addItem({
-    title,
-    description,
-    category: 'Криптовалюта',
-    isDone: false,
-  })
-
   lastTicketTitle.value = `${result.id} ${result.status}`
   order.note = ''
 }
@@ -265,8 +271,13 @@ function submitMarketOrder() {
   <section class="terminal-shell">
     <div class="terminal-topline">
       <div>
-        <p class="eyebrow">Perpetual demo</p>
+        <p class="eyebrow">Real market · demo trading</p>
         <h1>StockDesk X</h1>
+        <p class="market-source-line">
+          <span class="market-source-dot" :class="{ live: isLiveMarket }"></span>
+          <span>{{ marketStatus }}</span>
+          <span v-if="lastUpdated">· {{ formatTime(lastUpdated) }}</span>
+        </p>
       </div>
 
       <div class="account-dock" aria-label="Счет">
@@ -303,11 +314,15 @@ function submitMarketOrder() {
       </div>
     </div>
 
+    <div v-if="marketError" class="market-warning">
+      {{ marketError }}
+    </div>
+
     <div class="exchange-grid">
       <aside class="terminal-panel markets-panel">
         <div class="panel-heading">
           <h2>Markets</h2>
-          <span>USDT-M</span>
+          <span>Spot</span>
         </div>
 
         <button
@@ -335,7 +350,7 @@ function submitMarketOrder() {
         <div class="instrument-header">
           <div>
             <span class="asset-badge">{{ selectedMarket.symbol }}</span>
-            <h2>{{ selectedMarket.name }} perpetual</h2>
+            <h2>{{ selectedMarket.name }} spot market</h2>
           </div>
           <div class="price-stack">
             <strong>{{ formatMoney(selectedMarket.price, selectedMarket.precision) }}</strong>
@@ -350,33 +365,37 @@ function submitMarketOrder() {
             v-for="timeframe in timeframes"
             :key="timeframe.value"
             type="button"
-            :class="{ active: selectedTimeframe === timeframe.value }"
+            :class="{ active: selectedInterval === timeframe.value }"
             @click="setTimeframe(timeframe.value)"
           >
             {{ timeframe.label }}
           </button>
-          <span>MA · VOL · Funding</span>
+          <button
+            class="refresh-market-button"
+            type="button"
+            :disabled="isRefreshing"
+            @click="refreshMarketData"
+          >
+            {{ isRefreshing ? 'Обновление' : 'Обновить' }}
+          </button>
+          <span>Авто · {{ Math.round(refreshIntervalMs / 1000) }} сек</span>
         </div>
 
-        <div class="chart-canvas" aria-label="Демо график цены">
+        <div class="chart-canvas" aria-label="График цены">
           <svg class="price-chart" viewBox="0 0 600 240" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="warm-chart-fill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stop-color="#2f81f7" stop-opacity="0.28" />
-                <stop offset="100%" stop-color="#2f81f7" stop-opacity="0.02" />
-              </linearGradient>
-            </defs>
-
             <g class="chart-guides">
-              <line x1="24" x2="576" y1="44" y2="44" />
-              <line x1="24" x2="576" y1="92" y2="92" />
-              <line x1="24" x2="576" y1="140" y2="140" />
-              <line x1="24" x2="576" y1="188" y2="188" />
+              <line
+                v-for="guide in chartGuideLines"
+                :key="guide.id"
+                x1="24"
+                x2="576"
+                :y1="guide.y"
+                :y2="guide.y"
+              />
             </g>
 
-            <path class="chart-fill" :d="chartFillPath" />
             <polyline class="chart-line" :points="chartLinePoints" />
-            <circle class="chart-last-dot" :cx="chartLastPoint.x" :cy="chartLastPoint.y" r="5" />
+            <circle class="chart-last-dot" :cx="chartLastPoint.x" :cy="chartLastPoint.y" r="4" />
 
             <g class="volume-bars">
               <rect
@@ -384,15 +403,20 @@ function submitMarketOrder() {
                 :key="point.id"
                 :class="{ up: point.positive, down: !point.positive }"
                 :height="point.volumeHeight"
-                :x="point.x - 3"
-                :y="226 - point.volumeHeight"
-                width="5"
-                rx="2"
+                :x="point.x - 1.5"
+                :y="224 - point.volumeHeight"
+                width="3"
+                rx="1.5"
               />
             </g>
           </svg>
           <div class="chart-price-label">
             {{ formatMoney(selectedMarket.price, selectedMarket.precision) }}
+          </div>
+          <div class="chart-time-labels" aria-hidden="true">
+            <span v-for="timeLabel in chartTimeLabels" :key="timeLabel.id">
+              {{ timeLabel.label }}
+            </span>
           </div>
         </div>
 
@@ -429,8 +453,8 @@ function submitMarketOrder() {
             <strong>{{ formatMoney(selectedMarket.price * 1.0002, selectedMarket.precision) }}</strong>
           </div>
           <div>
-            <span>Funding</span>
-            <strong>{{ selectedMarket.fundingRate.toFixed(4) }}%</strong>
+            <span>Источник</span>
+            <strong>{{ isLiveMarket ? 'Binance Spot' : 'Fallback' }}</strong>
           </div>
           <div>
             <span>High 24h</span>
@@ -593,12 +617,13 @@ function submitMarketOrder() {
           <span>{{ positions.length }} активных</span>
         </div>
 
-        <div class="mini-table">
+        <div class="mini-table mini-table--positions">
           <div class="mini-table-head">
             <span>Пара</span>
             <span>Сторона</span>
             <span>Вход</span>
-            <span>Маржа</span>
+            <span>PnL</span>
+            <span></span>
           </div>
 
           <p v-if="!positions.length" class="empty-table-text">
@@ -611,7 +636,10 @@ function submitMarketOrder() {
               {{ formatSideLabel(position.side) }} x{{ position.leverage }}
             </span>
             <span>{{ formatSymbolPrice(position.symbol, position.entryPrice) }}</span>
-            <span>{{ formatMoney(position.margin) }}</span>
+            <span :class="getPositionPnl(position) >= 0 ? 'positive-text' : 'negative-text'">
+              {{ formatMoney(getPositionPnl(position)) }}
+            </span>
+            <button type="button" @click="closePositionById(position.id)">Закрыть</button>
           </div>
         </div>
       </section>
@@ -670,46 +698,4 @@ function submitMarketOrder() {
     </div>
   </section>
 
-  <section class="portfolio-workspace">
-    <div class="workspace-header compact">
-      <div>
-        <p class="eyebrow">Журнал</p>
-        <h2>Портфель торговых планов</h2>
-      </div>
-
-      <RouterLink class="primary-button" to="/create">Добавить вручную</RouterLink>
-    </div>
-
-    <section class="metrics-row metrics-row--three" aria-label="Сводка портфеля">
-      <div class="metric-tile">
-        <span>Всего</span>
-        <strong>{{ totalCount }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Активные</span>
-        <strong>{{ activeCount }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Закрытые</span>
-        <strong>{{ doneCount }}</strong>
-      </div>
-    </section>
-
-    <ItemFilters
-      v-model:search="filters.search"
-      v-model:category="filters.category"
-      v-model:status="filters.status"
-      :categories="categoryOptions"
-      @reset="resetFilters"
-    />
-
-    <ItemList
-      :items="filteredItems"
-      :view-mode="settings.viewMode"
-      empty-title="Ничего не найдено"
-      empty-text="Измените фильтры или создайте торговый план через терминал."
-      @toggle="toggleDone"
-      @delete="requestSoftDelete"
-    />
-  </section>
 </template>
